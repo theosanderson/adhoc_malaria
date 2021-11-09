@@ -1,0 +1,76 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+
+library(tidyverse)
+txt <- read_file("~/Desktop/pheno.xml")
+txt2 <- gsub("[[:cntrl:]]", "", txt)
+library(xml2)
+
+
+
+
+data = read_xml(txt2)
+data
+rm_gms = xml_find_all(data, "//rmgm")
+an_rm_gm = rm_gms[3]
+
+an_rm_gm
+
+process_an_rm_gm <- function(an_rm_gm){
+tags = xml_find_all(an_rm_gm,"//rmgmid")
+tag=tags[1]
+output = tibble(temp=1)
+output$rmgm_id = xml_text(tag)
+
+modifications = xml_find_first(an_rm_gm,"modifications")
+modifications = xml_find_all(modifications,"modification")
+gene_models = xml_find_all(modifications,"gene_model_pberghei")
+mod_type = xml_find_all(modifications,"mod_type")
+
+genes = xml_text(gene_models)
+num_modifications = length(modifications)
+
+#genes=paste(genes, collapse= " ")
+#mod_types=paste(mod_type, collapse= " ")
+
+output = tibble(genes=genes,mod_types=xml_text(mod_type))
+output$rmgm_id = xml_text(tag)
+
+reference_pubmed1 = xml_find_first(an_rm_gm,"reference_pubmed1")
+reference_pubmed1 = xml_text(reference_pubmed1)
+output$reference_pubmed1 = reference_pubmed1
+
+return(output)
+}
+library(pbapply)
+data = pblapply(rm_gms, process_an_rm_gm)
+rows = bind_rows(data)
+rows
+
+
+??fetch_pubmed_data
+as.numeric(rows$reference_pubmed1)
+
+write_csv(rows,"from_rmgmdb.csv")
+
+
+```
+
+Now we run the Python script
+
+```{r}
+library(lubridate)
+data = read_csv("./from_rmgmdb_with_pubmed_date.csv") %>% separate(reference_pubmed_date,into=c("year","month","day")) %>% mutate(year=as.numeric(year))
+summarised = data %>% group_by(genes,mod_types) %>% summarise(first_year= min(year,na.rm=TRUE)) %>% filter(!is.infinite(first_year)) %>% arrange(first_year)  %>% group_by(first_year,mod_types) %>% summarise(n=n()) %>% group_by(mod_types) %>% mutate(cumulative=cumsum(n))
+
+ggplot(summarised,aes(x=first_year,y=cumulative,color=str_to_title(mod_types)))+geom_line()+theme_bw()+labs(x="Year of publication",y="Genes with modification reported",color="Modification type")+geom_point()
+ggsave("pberghei.png",width=5,height=3)
+```
